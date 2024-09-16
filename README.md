@@ -1,6 +1,6 @@
 # Google Tag Manager 'PII - URL Cleaner' Server Variable Template
 
-[![Template Status](https://img.shields.io/badge/Community%20Template%20Gallery%20Status-published-green)](https://tagmanager.google.com/gallery/#/owners/justia/templates/gtm-pii-url-cleaner-server-variable) ![Repo Size](https://img.shields.io/github/repo-size/justia/gtm-pii-url-cleaner-server-variable) ![License](https://img.shields.io/github/license/justia/gtm-pii-url-cleaner-server-variable)
+![Repo Size](https://img.shields.io/github/repo-size/justia/gtm-pii-url-cleaner-server-variable) ![License](https://img.shields.io/github/license/justia/gtm-pii-url-cleaner-server-variable)
 
 ---
 
