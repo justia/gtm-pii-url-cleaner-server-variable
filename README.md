@@ -26,7 +26,6 @@ Query parameter values with dynamic or unknown keys can be redacted if the value
 By default, the keys are treated as regular expressions. For example, `phone_` will match all parameter keys starting with `phone_`, such as `phone_main` and `phone_office`. Check this box to disable regular expression matching and use exact key matching instead.
 
 ## Examples
-<img src="images/example01.png" width=400>
 
 ### Example 1
 **URL:**  
