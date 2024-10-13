@@ -20,7 +20,7 @@ List the query parameter keys to redact, delete or mask. You can use different m
 Query parameter values with dynamic or unknown keys can be redacted if the value matches a specified regular expression.
 
 ## Examples
-<img src="images/example1.png" width=400>
+<img src="images/example1.png" width=700>
 
 ## Tips
 Make sure to default the `false` value to the initial input, in case any error happens during the replacement of the URL.
