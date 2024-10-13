@@ -13,8 +13,8 @@ ___INFO___
   "id": "cvt_temp_public_id",
   "version": 1,
   "securityGroups": [],
-  "displayName": "PII - URL Cleaner",
-  "description": "Removes PII from URLs by redacting query parameters based on key or value, with support for regular expressions. Make sure to clean URLs to remove any PII before sending them to third parties.",
+  "displayName": "Clean or Redact PII from URLs",
+  "description": "Cleans PII from URLs by deleting, redacting, or masking query parameters based on key or value, with support for regular expressions.",
   "containerContexts": [
     "SERVER"
   ]
@@ -32,26 +32,92 @@ ___TEMPLATE_PARAMETERS___
     "valueHint": "https://domain.com"
   },
   {
-    "type": "TEXT",
-    "name": "replacement",
-    "displayName": "Replacement",
-    "simpleValueType": true,
-    "defaultValue": "[redacted]"
-  },
-  {
-    "type": "TEXT",
+    "type": "PARAM_TABLE",
     "name": "paramKeys",
-    "displayName": "Query Parameters",
-    "simpleValueType": true,
-    "defaultValue": "name|email|token",
-    "help": "Query parameters separated by |"
-  },
-  {
-    "type": "CHECKBOX",
-    "name": "paramKeysFullMatch",
-    "checkboxText": "Keys Full Match",
-    "simpleValueType": true,
-    "help": "By default, the keys are treated as regular expressions. For example, \u003ccode\u003eutm_\u003c/code\u003e will match all parameter keys starting with \u003ccode\u003eutm_\u003c/code\u003e, such as \u003ccode\u003eutm_source\u003c/code\u003e and \u003ccode\u003eutm_medium\u003c/code\u003e. Check this box to disable regular expression matching and use exact key matching instead."
+    "displayName": "Query Parameter Keys",
+    "paramTableColumns": [
+      {
+        "param": {
+          "type": "TEXT",
+          "name": "keyContents",
+          "displayName": "Parameter key",
+          "simpleValueType": true,
+          "help": "The parameter key or name"
+        },
+        "isUnique": false
+      },
+      {
+        "param": {
+          "type": "SELECT",
+          "name": "matchCondition",
+          "displayName": "Match Condition",
+          "macrosInSelect": false,
+          "selectItems": [
+            {
+              "value": "equals",
+              "displayValue": "equals"
+            },
+            {
+              "value": "equalsIgnore",
+              "displayValue": "equals (ignore case)"
+            },
+            {
+              "value": "matchesRegEx",
+              "displayValue": "matches RegEx"
+            },
+            {
+              "value": "matchesRegExIgnore",
+              "displayValue": "matches RegEx (ignore case)"
+            }
+          ],
+          "simpleValueType": true
+        },
+        "isUnique": false
+      },
+      {
+        "param": {
+          "type": "SELECT",
+          "name": "replacementType",
+          "displayName": "Replacement Type",
+          "macrosInSelect": false,
+          "selectItems": [
+            {
+              "value": "Redact",
+              "displayValue": "Redact"
+            },
+            {
+              "value": "Delete",
+              "displayValue": "Delete"
+            },
+            {
+              "value": "Mask",
+              "displayValue": "Mask"
+            }
+          ],
+          "simpleValueType": true
+        },
+        "isUnique": false
+      },
+      {
+        "param": {
+          "type": "TEXT",
+          "name": "replacement",
+          "displayName": "Replacement",
+          "simpleValueType": true,
+          "defaultValue": "[redact]",
+          "enablingConditions": [
+            {
+              "paramName": "replacementType",
+              "paramValue": "Redact",
+              "type": "EQUALS"
+            }
+          ]
+        },
+        "isUnique": false
+      }
+    ],
+    "help": "List the query parameter keys to redact, delete or mask. You can use different matching condition options.",
+    "newRowButtonText": "New Parameter Key"
   },
   {
     "type": "PARAM_TABLE",
@@ -62,9 +128,33 @@ ___TEMPLATE_PARAMETERS___
         "param": {
           "type": "TEXT",
           "name": "regex",
-          "displayName": "Regular Expression",
+          "displayName": "Parameter value regex",
           "simpleValueType": true,
           "help": "Examples: \u003csmall\u003e\u003cbr\u003eEmail: \u003cem\u003e[aA-zZ0-9._]+(@|%40)[aA-zZ0-9.-]+.[aA-zZ]\u003c/em\u003e\u003cbr\u003ePhone: \u003cem\u003e(\\+\\d+\\s)?\\(?\\d+\\)?[\\s.-]\\d+[\\s.-]\\d+\u003c/em\u003e\u003c/small\u003e"
+        },
+        "isUnique": false
+      },
+      {
+        "param": {
+          "type": "SELECT",
+          "name": "replacementType",
+          "displayName": "Replacement Type",
+          "macrosInSelect": false,
+          "selectItems": [
+            {
+              "value": "Redact",
+              "displayValue": "Redact"
+            },
+            {
+              "value": "Delete",
+              "displayValue": "Delete"
+            },
+            {
+              "value": "Mask",
+              "displayValue": "Mask"
+            }
+          ],
+          "simpleValueType": true
         },
         "isUnique": false
       },
@@ -74,13 +164,20 @@ ___TEMPLATE_PARAMETERS___
           "name": "replacement",
           "displayName": "Replacement",
           "simpleValueType": true,
-          "defaultValue": "[redacted]"
+          "defaultValue": "[redact]",
+          "enablingConditions": [
+            {
+              "paramName": "replacementType",
+              "paramValue": "Redact",
+              "type": "EQUALS"
+            }
+          ]
         },
         "isUnique": false
       }
     ],
     "help": "Query parameter values with dynamic or unknown keys can be redacted if the value matches a specified regular expression.",
-    "newRowButtonText": "New Parameter"
+    "newRowButtonText": "New Parameter Value"
   }
 ]
 
@@ -96,59 +193,60 @@ const encodeUriComponent = require('encodeUriComponent');
 const Object = require('Object');
 const getType = require('getType');
 const parseUrl = require('parseUrl');
+const sha256Sync = require('sha256Sync');
+
 
 // Inputs
 const config = {
   // 
   uri: data.url || '',
-  replaceEmails: data.replaceEmails || false,
-  replacement: data.replacement || '[redacted]',
-  paramKeys: data.paramKeys ? data.paramKeys.split('|') : [],
+  paramKeys: data.paramKeys || [],
   paramValues: data.paramValues || [],
   // advanced
-  fullMatch: getType(data.paramKeysFullMatch) !== 'undefined' ? data.paramKeysFullMatch : false,
   decodeUri: getType(data.decodeUri) !== 'undefined' ? data.decodeUri : true
 };
 
 // functions
 
-const doReplacements = function(str, regex, replacement) {
-  const match = str.match(regex);
+const doReplacements = function(text, row) {
+  const match = text.match(row.regex);
+  let textReplacement = row.replacement || '[redacted]';
+  
+  if (row.replacementType && row.replacementType == 'Delete') {
+    textReplacement = '[delete]';
+  }
 
   if (match) {
+    if (row.replacementType && row.replacementType == 'Mask') {
+      textReplacement = sha256Sync(match[0], {outputEncoding: 'hex'});
+    }
+    
     return doReplacements(
-      str.replace(match[0], replacement),
-      regex,
-      replacement
+      text.replace(match[0], textReplacement),
+      row
     );
   }
 
-  return str;
+  return text;
 };
 
 
-const shouldEncode = function(config, entry) {
-  // if the value type is not string (could be array), return false  
-  if (getType(entry[1]) !== 'string' || !entry[1]) {
-    return false;
+const shouldRedact = function(key, row) {
+  // we find if any of the query patterns match
+  if (row.matchCondition == "equals") {
+     return row.keyContents === key; 
   }
 
-  const key = entry[0];
+  if (row.matchCondition == "equalsIgnore") {
+     return row.keyContents.toLowerCase() === key.toLowerCase(); 
+  }
   
-  // note Array.prototype.find not available: 
-  // note Array.prototype.includes not available: 
-  // TypeError: Object has no 'find' property.
-  // TypeError: Object has no 'includes' property.
+  if (row.matchCondition == "matchesRegEx") {
+     return key.match(row.keyContents); 
+  }  
   
-  // we find if any of the query patterns match 
-  return config.paramKeys
-    .filter((pattern) => {
-      if (config.fullMatch) {
-        return key == pattern;
-      }
-      return key.match(pattern);
-    })
-    .length > 0;  
+  // regex ignore case
+  return key.toLowerCase().match(row.keyContents.toLowerCase());
 };
 
 // logic
@@ -162,22 +260,52 @@ if (getType(urlObject) === 'undefined' || !urlObject.search) {
 }
 
 const newParams = Object.entries(urlObject.searchParams).map((entry) => {
-  if (shouldEncode(config, entry)) {
-    return entry[0] + '=' + config.replacement;
+  // if the value type is not string (could be array), replacement is not supported 
+  if (getType(entry[1]) !== 'string') {
+    return entry[0] + '=' + entry[1];
   }
   
-  let paramValue = encodeUriComponent(entry[1]);
-  paramValue = Object.values(config.paramValues)
-    .reduce((value, pattern) => {
-      return doReplacements(value, pattern.regex, pattern.replacement);
-  }, paramValue);  
+  for (let i = 0; i < config.paramKeys.length; i++) {
+    let row = config.paramKeys[i];
+    
+    if (shouldRedact(entry[0], row)) {
+      if (row.replacementType && row.replacementType == "Delete") {
+        return null;
+      }
+      
+      if (!entry[1]) {
+        return entry[0] + '=';
+      }
+      
+      if (row.replacementType && row.replacementType == "Mask") {
+        return entry[0] + '=' + sha256Sync(entry[1], {outputEncoding: 'hex'});
+      }      
+      
+      return entry[0] + '=' + row.replacement;
+    }
+  }
+
   
+  let paramValue = encodeUriComponent(entry[1]);
+  
+  paramValue = Object.values(config.paramValues)
+    .reduce((value, row) => {
+      return doReplacements(
+        value, 
+        row);
+      }, paramValue);
+  
+  if (paramValue == '[delete]') {
+    return null;
+  }
   
   return entry[0] + '=' + paramValue;  
-}, '').join('&');
+}, '').filter(a => a).join('&');
 
+
+const newParamsText = newParams ? '?' + newParams : '';
 // return
-return urlObject.origin + urlObject.pathname + '?' + newParams + urlObject.hash;
+return urlObject.origin + urlObject.pathname + newParamsText + urlObject.hash;
 
 
 ___TESTS___
@@ -187,7 +315,12 @@ scenarios:
   code: |-
     const mockData = {
       url: 'https://mydomain.com/?foo=bar&other_param=Keep&1_Param1=My%20Value%20Here&20_Name=John&30_Phone=123456890&30_Email=test%40domain.com&40_Message=this%20is%20just%20a%20test%20msg',
-      paramKeys: '\\d+',
+      paramKeys: [
+        {
+           keyContents: '\\d+',
+           replacement: '[redacted]'
+        }
+      ],
       decodeUri: false
     };
 
@@ -200,7 +333,12 @@ scenarios:
   code: |-
     const mockData = {
       url: 'https://mydomain.com/?foo=bar&other=Keep&1_Value=My%20Values%20Here&10_Name=Maria&20_Phone=123456890&30_Email=test%40domain.com&40_Message=this%20is%20just%20a%20test%20msg',
-      paramKeys: '\\d+_',
+      paramKeys: [
+        {
+           keyContents: '\\d+',
+           replacement: '[redacted]'
+        }
+      ],
       decodeUri: false
     };
 
@@ -213,8 +351,12 @@ scenarios:
   code: |-
     const mockData = {
       url: 'https://mydomain.com/?foo=bar&1_Param=My%252520Test%252520Message&10_Name=test&20_Phone=123456890&30_Email=test%40domain.com&40_Message=this%2520is%2520just%2520a%2520test%2520msg',
-      paramKeys: '\\d+_',
-      decodeUri: false
+      paramKeys: [
+        {
+           keyContents: '\\d+',
+           replacement: '[redacted]'
+        }
+      ],  decodeUri: false
     };
 
     // Call runCode to run the template's code.
@@ -264,8 +406,12 @@ scenarios:
   code: |-
     const mockData = {
       url: 'https://www.test.com/subpath?success=1&10_Name=my%20name&20_Email=support@test.com&30_Phone=1234567890&40_Message=this%20is%20a%20test%20message,%20please%20ignore',
-      paramKeys: '\\d+',
-      decodeUri: false
+      paramKeys: [
+        {
+           keyContents: '\\d+',
+           replacement: '[redacted]'
+        }
+      ],  decodeUri: false
     };
 
     // Call runCode to run the template's code.
@@ -277,8 +423,12 @@ scenarios:
   code: |-
     const mockData = {
       url: 'https://www.test.com/thank-you-info/',
-      paramKeys: '\\d+',
-      decodeUri: false
+      paramKeys: [
+        {
+           keyContents: '\\d+',
+           replacement: '[redacted]'
+        }
+      ],  decodeUri: false
     };
 
     // Call runCode to run the template's code.
@@ -290,8 +440,12 @@ scenarios:
   code: |-
     const mockData = {
       url: 'https://www.test.com/thank-you-info/?Foo=bar+foo&5_From_Page=https://www.site.com/&10_Name=&20_Email=support@test.com&30_Phone=1234567890&40_Message=this%20is%20a%20test%20message,%20please%20ignore',
-      paramKeys: '\\d+',
-      decodeUri: false
+      paramKeys: [
+        {
+           keyContents: '\\d+',
+           replacement: '[redacted]'
+        }
+      ],  decodeUri: false
     };
 
     // Call runCode to run the template's code.
@@ -299,33 +453,60 @@ scenarios:
 
     // Verify that the variable returns a result.
     assertThat(variableResult).isEqualTo('https://www.test.com/thank-you-info/?Foo=bar%20foo&5_From_Page=[redacted]&10_Name=&20_Email=[redacted]&30_Phone=[redacted]&40_Message=[redacted]');
-- name: Test splitting by |
-  code: |-
-    const mockData = {
-      url: 'https://www.test.com/thank-you-info/?foo=bar+foo&10_Name=&20_Email=support@test.com&30_Phone=1234567890&40_Message=this%20is%20a%20test%20message,%20please%20ignore&utm_content=content&utm_source=newsletter&utm_medium=email',
-      paramKeys: 'foo|utm_|\\d+',
-      decodeUri: false
-    };
-
-    // Call runCode to run the template's code.
-    let variableResult = runCode(mockData);
-
-    // Verify that the variable returns a result.
-    assertThat(variableResult).isEqualTo('https://www.test.com/thank-you-info/?foo=[redacted]&10_Name=&20_Email=[redacted]&30_Phone=[redacted]&40_Message=[redacted]&utm_content=[redacted]&utm_source=[redacted]&utm_medium=[redacted]');
-- name: Test key full match
-  code: |-
-    const mockData = {
-      url: 'https://www.test.com/thank-you-info/?foo=bar+foo&10_Name=test&utm_source=newsletter&utm_medium=email',
-      paramKeys: 'foo|utm_|utm_medium|\\d+',
-      paramKeysFullMatch: true,
-      decodeUri: false
-    };
-
-    // Call runCode to run the template's code.
-    let variableResult = runCode(mockData);
-
-    // Verify that the variable returns a result.
-    assertThat(variableResult).isEqualTo('https://www.test.com/thank-you-info/?foo=[redacted]&10_Name=test&utm_source=newsletter&utm_medium=[redacted]');
+- name: Test more than 1
+  code: "const mockData = {\n  url: 'https://www.test.com/path/?foo=bar+foo&10_Name=&20_Email=support@test.com&30_Phone=1234567890&40_Message=this%20is%20a%20test%20message,%20please%20ignore&utm_content=content&utm_source=newsletter&utm_medium=email&keep=this',\n\
+    \  paramKeys: [\n    {\n      keyContents: 'foo',\n      replacement: '[redacted]'\n\
+    \    },\n    {\n      keyContents: 'utm_',\n      replacement: '[redacted]'\n\
+    \    },\n    {\n      keyContents: '\\\\d+',\n      replacement: '[redacted]'\n\
+    \    },\n  ],  \n  decodeUri: false\n};\n\n// Call runCode to run the template's\
+    \ code.\nlet variableResult = runCode(mockData);\n\n// Verify that the variable\
+    \ returns a result.\nassertThat(variableResult).isEqualTo('https://www.test.com/path/?foo=[redacted]&10_Name=&20_Email=[redacted]&30_Phone=[redacted]&40_Message=[redacted]&utm_content=[redacted]&utm_source=[redacted]&utm_medium=[redacted]&keep=this');"
+- name: Test key diff cases
+  code: "const mockData = {\n  url: 'https://www.test.com/?foo=encode&foOO=KEEP&equalsIgnorE=encode&dontIgnoreCasE=KEEP&redactThis=encode&myregENCODEthis=encode',\n\
+    \  paramKeys: [\n    {\n      keyContents: 'foo',\n      replacement: '[redacted]',\n\
+    \      matchCondition: 'equals'\n    },\n    {\n      keyContents: 'fooO',\n \
+    \     replacement: '[redacted]',\n      matchCondition: 'equals'\n    },    \n\
+    \    {\n      keyContents: 'equalsIgnore',\n      replacement: '[redacted]',\n\
+    \      matchCondition: 'equalsIgnore'      \n    },\n    {\n      keyContents:\
+    \ 'dontIgnoreCase',\n      replacement: '[redacted]',\n      matchCondition: 'matchesRegEx'\n\
+    \    },\n    {\n      keyContents: 'redactThis',\n      replacement: '[redacted]',\n\
+    \      matchCondition: 'matchesRegEx'\n    },    \n    {\n      keyContents: 'myregEncode',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegExIgnore'\n\
+    \    },\n  ],\n  decodeUri: false\n};\n\n// Call runCode to run the template's\
+    \ code.\nlet variableResult = runCode(mockData);\n\n// Verify that the variable\
+    \ returns a result.\nassertThat(variableResult).isEqualTo('https://www.test.com/?foo=[redacted]&foOO=KEEP&equalsIgnorE=[redacted]&dontIgnoreCasE=KEEP&redactThis=[redacted]&myregENCODEthis=[redacted]');"
+- name: Test key diff cases - Delete
+  code: "const mockData = {\n  url: 'https://www.test.com/?foo=encode&foOO=KEEP&equalsIgnorE=encode&dontIgnoreCasE=KEEP&redactThis=encode&myregENCODEthis=encode',\n\
+    \   paramKeys: [\n    {\n      keyContents: 'foo',\n      replacement: '[redacted]',\n\
+    \      matchCondition: 'equals',\n      replacementType: 'Delete'\n    },\n  \
+    \  {\n      keyContents: 'fooO',\n      replacement: '[redacted]',\n      matchCondition:\
+    \ 'equals',\n      replacementType: 'Delete'      \n    },    \n    {\n      keyContents:\
+    \ 'equalsIgnore',\n      replacement: '[redacted]',\n      matchCondition: 'equalsIgnore',\n\
+    \      replacementType: 'Delete'      \n    },\n    {\n      keyContents: 'dontIgnoreCase',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegEx',\n   \
+    \   replacementType: 'Delete'      \n    },\n    {\n      keyContents: 'redactThis',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegEx',\n   \
+    \   replacementType: 'Delete'      \n    },     \n    {\n      keyContents: 'myregEncode',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegExIgnore',\n\
+    \      replacementType: 'Delete'   \n    },\n  ],\n  decodeUri: false\n};\n\n\
+    // Call runCode to run the template's code.\nlet variableResult = runCode(mockData);\n\
+    \n// Verify that the variable returns a result.\nassertThat(variableResult).isEqualTo('https://www.test.com/?foOO=KEEP&dontIgnoreCasE=KEEP');"
+- name: Test key diff cases - Mask
+  code: "const mockData = {\n  url: 'https://www.test.com/?foo=encode1&foOO=KEEP&equalsIgnorE=encode2&dontIgnoreCasE=KEEP&redactThis=encode3&myregENCODEthis=encode4',\n\
+    \   paramKeys: [\n    {\n      keyContents: 'foo',\n      replacement: '[redacted]',\n\
+    \      matchCondition: 'equals',\n      replacementType: 'Mask'\n    },\n    {\n\
+    \      keyContents: 'fooO',\n      replacement: '[redacted]',\n      matchCondition:\
+    \ 'equals',\n      replacementType: 'Mask'      \n    },    \n    {\n      keyContents:\
+    \ 'equalsIgnore',\n      replacement: '[redacted]',\n      matchCondition: 'equalsIgnore',\n\
+    \      replacementType: 'Mask'      \n    },\n    {\n      keyContents: 'dontIgnoreCase',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegEx',\n   \
+    \   replacementType: 'Mask'      \n    },\n    {\n      keyContents: 'redactThis',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegEx',\n   \
+    \   replacementType: 'Mask'      \n    },     \n    {\n      keyContents: 'myregEncode',\n\
+    \      replacement: '[redacted]',\n      matchCondition: 'matchesRegExIgnore',\n\
+    \      replacementType: 'Mask'   \n    },\n  ],\n  decodeUri: false\n};\n\n//\
+    \ Call runCode to run the template's code.\nlet variableResult = runCode(mockData);\n\
+    \n// Verify that the variable returns a result.\nassertThat(variableResult).isEqualTo('https://www.test.com/?foo=1ff34b0a335cb280c6771fe316bf5c4930885a6bf8eaaeb96e0658d527e04656&foOO=KEEP&equalsIgnorE=e70ebb2e5b6aad2b9f0cc6528919912b0e0b9f00d5e5c6960739cede48199a48&dontIgnoreCasE=KEEP&redactThis=61d31032d59cb9db0a94c4737403fa23e63b9e753e26f20ba47ed3313098cb8d&myregENCODEthis=05c08c6ab8e1edb4ac9896d223c4cb3033e26c8ed2b37f7735bbdbc3469838dc');"
 
 
 ___NOTES___
