@@ -1,4 +1,4 @@
-# Google Tag Manager 'PII - URL Cleaner' Server Variable Template
+# GTM 'Clean or Redact PII from URLs' Server Variable Template
 
 ![Repo Size](https://img.shields.io/github/repo-size/justia/gtm-pii-url-cleaner-server-variable) ![License](https://img.shields.io/github/license/justia/gtm-pii-url-cleaner-server-variable)
 
